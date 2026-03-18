@@ -1,0 +1,60 @@
+{
+    "routerMap": [
+      {
+        "name": "Login",
+        "pageSourceFile": "src/main/ets/pages/Login.ets",
+        "buildFunction": "LoginBuilder",
+        "data": {
+          "description": "this is Login"
+        }
+      },
+      {
+        "name": "MainLayout",
+        "pageSourceFile": "src/main/ets/pages/MainLayout.ets",
+        "buildFunction": "MainLayoutBuilder",
+        "data": {
+          "description": "this is MainLayout"
+        }
+      },
+      {
+        "name": "IrrigationControlPage",
+        "pageSourceFile": "src/main/ets/pages/IrrigationControlPage.ets",
+        "buildFunction": "IrrigationControlPageBuilder",
+        "data": {
+          "description": "this is IrrigationControlPage"
+        }
+      },
+      {
+        "name": "LightingControlPage",
+        "pageSourceFile": "src/main/ets/pages/LightingControlPage.ets",
+        "buildFunction": "LightingControlPageBuilder",
+        "data": {
+          "description": "this is LightingControlPage"
+        }
+      },
+      {
+        "name": "VentilationControlPage",
+        "pageSourceFile": "src/main/ets/pages/VentilationControlPage.ets",
+        "buildFunction": "VentilationControlPageBuilder",
+        "data": {
+          "description": "this is VentilationControlPage"
+        }
+      },
+      {
+        "name": "WarningControlPage",
+        "pageSourceFile": "src/main/ets/pages/WarningControlPage.ets",
+        "buildFunction": "WarningControlPageBuilder",
+        "data": {
+          "description": "this is WarningControlPage"
+        }
+      },
+      {
+        "name": "TrendPage",
+        "pageSourceFile": "src/main/ets/pages/TrendPageView.ets",
+        "buildFunction": "TrendPageBuilder",
+        "data": {
+          "description": "this is TrendPage"
+        }
+      }
+    ]
+}
