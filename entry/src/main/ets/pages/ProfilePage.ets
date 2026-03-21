@@ -29,11 +29,11 @@ export struct ProfilePage {
         Column({ space: 12 }) {
           // 用户信息区
           Row({ space: 16 }) {
-            Column()
+            Image($r('app.media.bird'))
               .width(56)
               .height(56)
               .borderRadius(28)
-              .backgroundColor('#E8F5E9')
+              .objectFit(ImageFit.Cover)
             Column({ space: 4 }) {
               Text('test1')
                 .fontSize(18)

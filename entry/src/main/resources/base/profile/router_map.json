@@ -63,6 +63,14 @@
         "data": {
           "description": "farm staff chat placeholder"
         }
+      },
+      {
+        "name": "ChatDetailPage",
+        "pageSourceFile": "src/main/ets/pages/ChatDetailPage.ets",
+        "buildFunction": "ChatDetailPageBuilder",
+        "data": {
+          "description": "chat detail placeholder"
+        }
       }
     ]
 }
