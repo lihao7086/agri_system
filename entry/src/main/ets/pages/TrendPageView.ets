@@ -56,18 +56,43 @@ struct TrendPage {
     this.queryTrendData();
   }
 
+  private getTodayDateText(): string {
+    const now: Date = new Date();
+    const year: number = now.getFullYear();
+    const month: string = String(now.getMonth() + 1).padStart(2, '0');
+    const day: string = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private getItemDateText(rawDate: string): string {
+    // 兼容 "YYYY-MM-DD" 或 "YYYY-MM-DD HH:mm:ss"
+    return rawDate.length >= 10 ? rawDate.substring(0, 10) : rawDate;
+  }
+
   async queryTrendData(): Promise<void> {
     this.loading = true;
     this.errorMsg = '';
     hilog.info(0x0000, 'TrendPage', `开始查询7天均值, deviceId=${HTTP_SERVER_CONFIG.deviceId}`);
     try {
       const res: SevenDaysAvgModel = await query7DaysAvgData(HTTP_SERVER_CONFIG.deviceId);
+      const todayText: string = this.getTodayDateText();
+      const filteredList: AvgItemModel[] = res.avgList.filter((item: AvgItemModel): boolean => {
+        return this.getItemDateText(item.date) !== todayText;
+      });
       this.deviceId = res.deviceId.length > 0 ? res.deviceId : HTTP_SERVER_CONFIG.deviceId;
-      this.timeRange = res.timeRange.length > 0 ? res.timeRange : '--';
-      this.daysCount = res.daysCount;
-      this.avgList = res.avgList;
+      this.avgList = filteredList;
+      this.daysCount = filteredList.length;
+      if (filteredList.length > 0) {
+        const startDate: string = this.getItemDateText(filteredList[0].date);
+        const endDate: string = this.getItemDateText(filteredList[filteredList.length - 1].date);
+        this.timeRange = `${startDate} 至 ${endDate}`;
+      } else {
+        this.timeRange = '--';
+      }
       this.lastUpdateTime = res.timestamp.length > 0 ? res.timestamp : new Date().toLocaleString();
       this.lastQuerySuccess = true;
+      hilog.info(0x0000, 'TrendPage',
+        `趋势数据过滤完成: 原始${res.avgList.length}条, 过滤当日后${filteredList.length}条, today=${todayText}`);
       this.drawTrendChart();
     } catch (_error) {
       const errorText: string = _error instanceof Error ? _error.message : String(_error);
@@ -359,5 +384,6 @@ struct TrendPage {
       .alignItems(HorizontalAlign.Start)
       .expandSafeArea()
     }
+    .hideTitleBar(true)
   }
 }

@@ -12,10 +12,16 @@ export struct ProfilePage {
 
         Blank()
 
+        Image($r('app.media.chat'))
+          .width(28)
+          .height(28)
+          .onClick(() => {
+            this.pathStack.pushPathByName('ChatPage', null, false);
+          })
       }
       .width('100%')
       .height(56)
-      .padding({ left: 16, right: 16 })
+      .padding({ left: 16, right: 25 })
       .backgroundColor('#2E7D32')
       .alignItems(VerticalAlign.Center)
 
@@ -29,7 +35,7 @@ export struct ProfilePage {
               .borderRadius(28)
               .backgroundColor('#E8F5E9')
             Column({ space: 4 }) {
-              Text('用户')
+              Text('test1')
                 .fontSize(18)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#333333')
@@ -46,8 +52,6 @@ export struct ProfilePage {
           .borderRadius(12)
 
           // 菜单列表
-          this.MenuItem('设备管理', '网关与设备连接');
-          this.MenuItem('预警设置', '阈值与预警规则');
           this.MenuItem('关于', '版本与说明');
         }
         .width('100%')

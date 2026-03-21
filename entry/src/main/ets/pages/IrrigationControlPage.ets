@@ -294,5 +294,6 @@ struct IrrigationControlPage {
       .backgroundColor('#F0F2F5')
       .expandSafeArea()
     }
+    .hideTitleBar(true)
   }
 }

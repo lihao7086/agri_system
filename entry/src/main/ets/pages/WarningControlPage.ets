@@ -56,12 +56,12 @@ struct WarningControlPage {
       List() {
         ListItem() {
           Column({ space: 16 }) {
-            Text('智能预警控制')
+            Text('智能预警配置')
               .fontSize(22)
               .fontWeight(FontWeight.Bold)
               .fontColor(Color.Black)
 
-            Text('为各环境参数配置预警上下限，首页将根据阈值和实时数据自动给出预警提示。')
+            Text('为各环境参数配置预警上下限，将根据阈值和实时数据自动给出预警提示。')
               .fontSize(13)
               .fontColor('#666666')
 

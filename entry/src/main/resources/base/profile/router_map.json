@@ -55,6 +55,14 @@
         "data": {
           "description": "this is TrendPage"
         }
+      },
+      {
+        "name": "ChatPage",
+        "pageSourceFile": "src/main/ets/pages/ChatPage.ets",
+        "buildFunction": "ChatPageBuilder",
+        "data": {
+          "description": "farm staff chat placeholder"
+        }
       }
     ]
 }

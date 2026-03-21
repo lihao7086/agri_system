@@ -124,23 +124,6 @@ function doGet(url: string): Promise<string> {
   });
 }
 
-/** 健康检查：GET /api/health 
-export async function healthCheck(): Promise<boolean> {
-  try {
-    const url: string = buildUrl('/api/health', '');
-    const text: string = await doGet(url);
-    const root: HealthResponsePayload = JSON.parse(text) as HealthResponsePayload;
-    if (root.code === undefined) {
-      return true; // 兼容仅返回字符串/简单JSON的健康接口
-    }
-    return root.code === 200;
-  } catch (err) {
-    hilog.error(0x0000, 'HttpData', `healthCheck失败: ${err instanceof Error ? err.message : String(err)}`);
-    return false;
-  }
-}*/
-
-/** 查询最新数据：GET /api/get_latest_data?device_id=xxx */
 export async function queryLatestSensorData(deviceId: string): Promise<SensorDataModel> {
   const query: string = `device_id=${encodeURIComponent(deviceId)}`;
   const url: string = buildUrl('/api/get_latest_data', query);
