@@ -71,6 +71,14 @@
         "data": {
           "description": "chat detail placeholder"
         }
+      },
+      {
+        "name": "AiQaPage",
+        "pageSourceFile": "src/main/ets/pages/AiQaPage.ets",
+        "buildFunction": "AiQaPageBuilder",
+        "data": {
+          "description": "ai question and answer page"
+        }
       }
     ]
 }

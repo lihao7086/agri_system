@@ -265,6 +265,55 @@ export struct HomePage {
             .alignItems(HorizontalAlign.Start)
           }
 
+          // AI 问答轻量入口
+          ListItem() {
+            Column() {
+              Row({ space: 12 }) {
+                Row({ space: 8 }) {
+                  Image($r('app.media.ai'))
+                    .width(20)
+                    .height(20)
+                    .fillColor('#2E7D32')
+                  Column({ space: 2 }) {
+                    Text('AI农技问答')
+                      .fontSize(16)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor('#333333')
+                    Text('快速提问，获取种植建议')
+                      .fontSize(12)
+                      .fontColor('#666666')
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                }
+                .layoutWeight(1)
+                .alignItems(VerticalAlign.Center)
+
+                Button('去提问')
+                  .height(32)
+                  .fontSize(12)
+                  .fontColor(Color.White)
+                  .backgroundColor('#2E7D32')
+                  .borderRadius(8)
+                  .onClick(() => {
+                    this.openAiQaPage();
+                  })
+              }
+              .width('100%')
+              .padding(10)
+              .backgroundColor(Color.White)
+              .borderRadius(8)
+              .alignItems(VerticalAlign.Center)
+              .onClick(() => {
+                this.openAiQaPage();
+              })
+            }
+            .width('100%')
+            .padding(16)
+            .backgroundColor('#F8F9FA')
+            .borderRadius(12)
+            .alignItems(HorizontalAlign.Start)
+          }
+
           // 快捷控制板块
           ListItem() {
             Column({ space: 12 }) {
@@ -507,6 +556,10 @@ export struct HomePage {
 
   openTrendPage(): void {
     this.pathStack.pushPathByName('TrendPage', null, false);
+  }
+
+  openAiQaPage(): void {
+    this.pathStack.pushPathByName('AiQaPage', null, false);
   }
 
   handleGatewayAction(): void {

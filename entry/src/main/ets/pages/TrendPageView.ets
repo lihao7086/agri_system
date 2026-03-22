@@ -5,6 +5,12 @@ import {
   query7DaysAvgData,
   SevenDaysAvgModel
 } from './http';
+import {
+  registerWeeklyReportListener,
+  unregisterWeeklyReportListener,
+  WeeklyReportListener,
+  WeeklyReportModel
+} from './mqtt';
 
 type AvgMetricKey = 'tempAvg' | 'humAvg' | 'co2Avg' | 'phAvg' | 'soilMoistAvg' | 'lightAvg';
 
@@ -42,6 +48,12 @@ struct TrendPage {
   @State daysCount: number = 0;
   @State avgList: AvgItemModel[] = [];
   @State activeMetricIndex: number = 0;
+  @State weeklyReportCode: number = 0;
+  @State weeklyReportText: string = '';
+  @State weeklyDataPeriod: string = '';
+  @State weeklyReportTimestamp: string = '';
+  @State weeklyReportDeviceId: string = '';
+  private weeklyReportListener: WeeklyReportListener | undefined = undefined;
 
   private readonly metrics: TrendMetricOption[] = [
     { key: 'tempAvg', title: '温度', unit: '°C', color: '#FF7043' },
@@ -54,6 +66,21 @@ struct TrendPage {
 
   aboutToAppear(): void {
     this.queryTrendData();
+    this.weeklyReportListener = (data: WeeklyReportModel): void => {
+      this.weeklyReportCode = data.code;
+      this.weeklyReportDeviceId = data.device_id;
+      this.weeklyReportText = data.report;
+      this.weeklyReportTimestamp = data.timestamp;
+      this.weeklyDataPeriod = data.data_period;
+    };
+    registerWeeklyReportListener(this.weeklyReportListener);
+  }
+
+  aboutToDisappear(): void {
+    if (this.weeklyReportListener !== undefined) {
+      unregisterWeeklyReportListener(this.weeklyReportListener);
+      this.weeklyReportListener = undefined;
+    }
   }
 
   private getTodayDateText(): string {
@@ -256,127 +283,192 @@ struct TrendPage {
         .backgroundColor('#2E7D32')
         .alignItems(VerticalAlign.Center)
 
-        Column({ space: 12 }) {
-          Column({ space: 10 }) {
-            Text(`设备ID：${this.deviceId}`)
-              .fontSize(14)
-              .fontWeight(FontWeight.Medium)
-              .fontColor('#333333')
-              .alignSelf(ItemAlign.Start)
-            Text(`统计范围：${this.timeRange}`)
-              .fontSize(13)
-              .fontColor('#666666')
-              .alignSelf(ItemAlign.Start)
-            Text(`天数：${this.daysCount}`)
-              .fontSize(13)
-              .fontColor('#666666')
-              .alignSelf(ItemAlign.Start)
-            Text(`最后更新时间：${this.lastUpdateTime}`)
-              .fontSize(12)
-              .fontColor('#999999')
-              .alignSelf(ItemAlign.Start)
-          }
-          .width('100%')
-          .padding(14)
-          .backgroundColor(Color.White)
-          .borderRadius(12)
-          .alignItems(HorizontalAlign.Start)
-
-          if (this.loading) {
-            Column() {
-              Text('正在查询近7天平均值数据...')
-                .fontSize(13)
-                .fontColor('#666666')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-          } else if (!this.lastQuerySuccess) {
-            Column() {
-              Text(`查询失败：${this.errorMsg.length > 0 ? this.errorMsg : '未知错误'}`)
-                .fontSize(13)
-                .fontColor(Color.Red)
-                .textAlign(TextAlign.Center)
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-          } else if (this.avgList.length === 0) {
-            Column() {
-              Text('暂无近7天平均值数据')
-                .fontSize(13)
-                .fontColor('#666666')
-            }
-            .width('100%')
-            .layoutWeight(1)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(HorizontalAlign.Center)
-          } else {
+        Scroll() {
+          Column({ space: 12 }) {
             Column({ space: 10 }) {
-              Swiper() {
-                ForEach(this.metrics, (metric: TrendMetricOption, index: number) => {
-                  Column({ space: 6 }) {
-                    Text(`近7天${metric.title}每日平均值`)
-                      .fontSize(15)
-                      .fontWeight(FontWeight.Medium)
-                      .fontColor('#333333')
-                    Text(`单位：${metric.unit.length > 0 ? metric.unit : '--'}`)
-                      .fontSize(12)
-                      .fontColor('#666666')
-                  }
-                  .width('100%')
-                  .height('100%')
-                  .justifyContent(FlexAlign.Center)
-                  .alignItems(HorizontalAlign.Center)
-                }, (metric: TrendMetricOption, index: number) => `${metric.key}-${index}`)
+              Text(`设备ID：${this.deviceId}`)
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#333333')
+                .alignSelf(ItemAlign.Start)
+              Text(`统计范围：${this.timeRange}`)
+                .fontSize(13)
+                .fontColor('#666666')
+                .alignSelf(ItemAlign.Start)
+              Text(`天数：${this.daysCount}`)
+                .fontSize(13)
+                .fontColor('#666666')
+                .alignSelf(ItemAlign.Start)
+              Text(`最后更新时间：${this.lastUpdateTime}`)
+                .fontSize(12)
+                .fontColor('#999999')
+                .alignSelf(ItemAlign.Start)
+            }
+            .width('100%')
+            .padding(14)
+            .backgroundColor(Color.White)
+            .borderRadius(12)
+            .alignItems(HorizontalAlign.Start)
+
+            if (this.loading) {
+              Column() {
+                Text('正在查询近7天平均值数据...')
+                  .fontSize(13)
+                  .fontColor('#666666')
               }
               .width('100%')
-              .height(74)
-              .autoPlay(true)
-              .interval(5000)
-              .loop(true)
-              .indicator(false)
-              .onChange((index: number) => {
-                this.activeMetricIndex = index;
-                this.drawTrendChart();
-              })
-
-              Canvas(this.chartContext)
-                .width(this.chartWidth)
-                .height(this.chartHeight)
-                .backgroundColor(Color.White)
-                .onReady(() => {
-                  this.chartReady = true;
+              .constraintSize({ minHeight: 280 })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+            } else if (!this.lastQuerySuccess) {
+              Column() {
+                Text(`查询失败：${this.errorMsg.length > 0 ? this.errorMsg : '未知错误'}`)
+                  .fontSize(13)
+                  .fontColor(Color.Red)
+                  .textAlign(TextAlign.Center)
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 280 })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+            } else if (this.avgList.length === 0) {
+              Column() {
+                Text('暂无近7天平均值数据')
+                  .fontSize(13)
+                  .fontColor('#666666')
+              }
+              .width('100%')
+              .constraintSize({ minHeight: 280 })
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+            } else {
+              Column({ space: 10 }) {
+                Swiper() {
+                  ForEach(this.metrics, (metric: TrendMetricOption, index: number) => {
+                    Column({ space: 6 }) {
+                      Text(`近7天${metric.title}每日平均值`)
+                        .fontSize(15)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor('#333333')
+                      Text(`单位：${metric.unit.length > 0 ? metric.unit : '--'}`)
+                        .fontSize(12)
+                        .fontColor('#666666')
+                    }
+                    .width('100%')
+                    .height('100%')
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(HorizontalAlign.Center)
+                  }, (metric: TrendMetricOption, index: number) => `${metric.key}-${index}`)
+                }
+                .width('100%')
+                .height(74)
+                .autoPlay(true)
+                .interval(5000)
+                .loop(true)
+                .indicator(false)
+                .onChange((index: number) => {
+                  this.activeMetricIndex = index;
                   this.drawTrendChart();
                 })
 
-              Row({ space: 6 }) {
-                ForEach(this.metrics, (_metric: TrendMetricOption, index: number) => {
-                  Circle()
-                    .width(6)
-                    .height(6)
-                    .fill(index === this.activeMetricIndex ? '#2E7D32' : '#D0D0D0')
-                }, (_metric: TrendMetricOption, index: number) => `${index}`)
+                Canvas(this.chartContext)
+                  .width(this.chartWidth)
+                  .height(this.chartHeight)
+                  .backgroundColor(Color.White)
+                  .onReady(() => {
+                    this.chartReady = true;
+                    this.drawTrendChart();
+                  })
+
+                Row({ space: 6 }) {
+                  ForEach(this.metrics, (_metric: TrendMetricOption, index: number) => {
+                    Circle()
+                      .width(6)
+                      .height(6)
+                      .fill(index === this.activeMetricIndex ? '#2E7D32' : '#D0D0D0')
+                  }, (_metric: TrendMetricOption, index: number) => `${index}`)
+                }
+                .width('100%')
+                .justifyContent(FlexAlign.Center)
+                .padding({ top: 2, bottom: 2 })
               }
               .width('100%')
-              .justifyContent(FlexAlign.Center)
-              .padding({ top: 2, bottom: 2 })
+              .padding(12)
+              .backgroundColor(Color.White)
+              .borderRadius(12)
+              .alignItems(HorizontalAlign.Center)
+              .justifyContent(FlexAlign.Start)
+
+              Column({ space: 10 }) {
+                Row({ space: 8 }) {
+                  Image($r('app.media.ai'))
+                    .width(24)
+                    .height(24)
+                    .fillColor('#2E7D32')
+                  Text('周报分析与未来预测')
+                    .fontSize(16)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#333333')
+                }
+                .width('100%')
+                .alignItems(VerticalAlign.Center)
+
+                if (this.weeklyDataPeriod.length > 0) {
+                  Text(`数据周期：${this.weeklyDataPeriod}`)
+                    .fontSize(13)
+                    .fontColor('#666666')
+                    .width('100%')
+                }
+                if (this.weeklyReportTimestamp.length > 0) {
+                  Text(`生成时间：${this.weeklyReportTimestamp}`)
+                    .fontSize(12)
+                    .fontColor('#999999')
+                    .width('100%')
+                }
+                if (this.weeklyReportDeviceId.length > 0) {
+                  Text(`设备：${this.weeklyReportDeviceId}`)
+                    .fontSize(12)
+                    .fontColor('#999999')
+                    .width('100%')
+                }
+
+                if (this.weeklyReportText.length > 0) {
+                  Text(this.weeklyReportText)
+                    .fontSize(14)
+                    .fontColor('#333333')
+                    .lineHeight(22)
+                    .width('100%')
+                } else {
+                  Text('暂无周报内容，请等待服务端推送至主题 agri/server/weekly_report(Markdown 正文将显示于此）')
+                    .fontSize(13)
+                    .fontColor('#999999')
+                    .lineHeight(20)
+                    .width('100%')
+                }
+
+                if (this.weeklyReportCode !== 0 && this.weeklyReportCode !== 200) {
+                  Text(`状态码：${this.weeklyReportCode}`)
+                    .fontSize(12)
+                    .fontColor('#C62828')
+                    .width('100%')
+                }
+              }
+              .width('100%')
+              .padding(14)
+              .backgroundColor(Color.White)
+              .borderRadius(12)
+              .alignItems(HorizontalAlign.Start)
             }
-            .width('100%')
-            .layoutWeight(1)
-            .padding(12)
-            .backgroundColor(Color.White)
-            .borderRadius(12)
-            .alignItems(HorizontalAlign.Center)
-            .justifyContent(FlexAlign.Start)
           }
+          .width('100%')
+          .padding({ left: 20, right: 20, top: 4, bottom: 16 })
+          .alignItems(HorizontalAlign.Center)
         }
         .width('100%')
         .layoutWeight(1)
-        .padding({ left: 20, right: 20, top: 4, bottom: 16 })
-        .alignItems(HorizontalAlign.Center)
+        .scrollBar(BarState.Auto)
+        .edgeEffect(EdgeEffect.Spring)
+        .align(Alignment.Top)
       }
       .width('100%')
       .height('100%')

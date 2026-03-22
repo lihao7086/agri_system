@@ -32,6 +32,12 @@ export interface MqttTopics {
   deviceStatus: string;
   /** 硬件上报：具体设备真实开关状态（on/off） */
   deviceSwitchStatus: string;
+  /** 服务器 → APP：周报分析与预测（Markdown 文本） */
+  weeklyReport: string;
+  /** APP → 服务器：AI 问答提问 */
+  aiQuestion: string;
+  /** 服务器 → APP：AI 问答回答 */
+  aiAnswer: string;
 }
 
 export interface SensorDataModel {
@@ -150,9 +156,52 @@ export interface DeviceSwitchReportModel {
 
 export type DeviceSwitchReportListener = (report: DeviceSwitchReportModel) => void;
 
+/** 服务器推送的周报 JSON（agri/server/weekly_report） */
+export interface WeeklyReportModel {
+  code: number;
+  device_id: string;
+  report: string;
+  timestamp: string;
+  data_period: string;
+}
+
+export type WeeklyReportListener = (data: WeeklyReportModel) => void;
+
+export interface AiAnswerModel {
+  code: number;
+  device_id: string;
+  question: string;
+  answer: string;
+  timestamp: string;
+}
+
+export type AiAnswerListener = (data: AiAnswerModel) => void;
+
 interface DeviceActionPayload {
   device_type: DeviceType;
   action: DeviceAction;
+}
+
+interface WeeklyReportPayload {
+  code?: number;
+  device_id?: string;
+  report?: string;
+  timestamp?: string;
+  data_period?: string;
+}
+
+interface AiQuestionPayload {
+  device_id: string;
+  question: string;
+  timestamp: string;
+}
+
+interface AiAnswerPayload {
+  device_id?: string;
+  question?: string;
+  answer?: string;
+  timestamp?: string;
+  code?: number;
 }
 
 export const SERVER_CONFIG: ServerConfig = {
@@ -176,7 +225,13 @@ export const MQTT_TOPICS: MqttTopics = {
   // 服务器收到硬件上下线后向 App 推送设备状态（App 订阅此主题）
   deviceStatus: 'agri/app/device_status',
   // 硬件上报：具体设备开关真实状态
-  deviceSwitchStatus: `agri/device/${SERVER_CONFIG.deviceId}/device_status`
+  deviceSwitchStatus: `agri/device/${SERVER_CONFIG.deviceId}/device_status`,
+  // 服务器 → APP：周报分析
+  weeklyReport: 'agri/server/weekly_report',
+  // APP → 服务器：AI 问答问题
+  aiQuestion: 'agri/app/question',
+  // 服务器 → APP：AI 问答回答
+  aiAnswer: 'agri/server/answer'
 };
 
 export const sensorData: SensorDataModel = {
@@ -245,6 +300,8 @@ let sensorDataListener: SensorDataListener | undefined = undefined;
 let deviceStatusListeners: Set<DeviceStatusListener> = new Set<DeviceStatusListener>();
 let deviceControlStateListeners: Set<DeviceControlStateListener> = new Set<DeviceControlStateListener>();
 let deviceSwitchReportListeners: Set<DeviceSwitchReportListener> = new Set<DeviceSwitchReportListener>();
+let weeklyReportListeners: Set<WeeklyReportListener> = new Set<WeeklyReportListener>();
+let aiAnswerListeners: Set<AiAnswerListener> = new Set<AiAnswerListener>();
 
 export function registerSensorDataListener(listener?: SensorDataListener): void {
   sensorDataListener = listener;
@@ -278,6 +335,34 @@ export function registerDeviceSwitchReportListener(listener: DeviceSwitchReportL
 
 export function unregisterDeviceSwitchReportListener(listener: DeviceSwitchReportListener): void {
   deviceSwitchReportListeners.delete(listener);
+}
+
+export function registerWeeklyReportListener(listener: WeeklyReportListener): void {
+  weeklyReportListeners.add(listener);
+}
+
+export function unregisterWeeklyReportListener(listener: WeeklyReportListener): void {
+  weeklyReportListeners.delete(listener);
+}
+
+export function registerAiAnswerListener(listener: AiAnswerListener): void {
+  aiAnswerListeners.add(listener);
+}
+
+export function unregisterAiAnswerListener(listener: AiAnswerListener): void {
+  aiAnswerListeners.delete(listener);
+}
+
+function notifyWeeklyReport(data: WeeklyReportModel): void {
+  weeklyReportListeners.forEach((listener: WeeklyReportListener) => {
+    listener(data);
+  });
+}
+
+function notifyAiAnswer(data: AiAnswerModel): void {
+  aiAnswerListeners.forEach((listener: AiAnswerListener) => {
+    listener(data);
+  });
 }
 
 function notifyDeviceSwitchReport(report: DeviceSwitchReportModel): void {
@@ -339,6 +424,10 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
           parseDeviceStatus(dataStr);
         } else if (topic === MQTT_TOPICS.deviceSwitchStatus) {
           parseDeviceSwitchStatus(dataStr);
+        } else if (topic === MQTT_TOPICS.weeklyReport) {
+          parseWeeklyReportPayload(dataStr);
+        } else if (topic === MQTT_TOPICS.aiAnswer) {
+          parseAiAnswerPayload(dataStr);
         }
       });
 
@@ -361,6 +450,8 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
           const subOpts3: MqttSubscribeOptions = { topic: MQTT_TOPICS.deviceStatus, qos: 1 };
           const subOpts4: MqttSubscribeOptions = { topic: MQTT_TOPICS.controlCmd, qos: 1 };
           const subOpts5: MqttSubscribeOptions = { topic: MQTT_TOPICS.deviceSwitchStatus, qos: 1 };
+          const subOpts6: MqttSubscribeOptions = { topic: MQTT_TOPICS.weeklyReport, qos: 1 };
+          const subOpts7: MqttSubscribeOptions = { topic: MQTT_TOPICS.aiAnswer, qos: 1 };
           mqttClient.subscribe(subOpts1).then(() => {
             hilog.info(0x0000, 'TransportCore', `已订阅（收数据）：${MQTT_TOPICS.sensorData}`);
           }).catch((err: MqttBusinessError) => {
@@ -385,6 +476,16 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
             hilog.info(0x0000, 'TransportCore', `已订阅（设备开关状态）：${MQTT_TOPICS.deviceSwitchStatus}`);
           }).catch((err: MqttBusinessError) => {
             hilog.error(0x0000, 'TransportCore', `订阅设备开关状态主题失败：${err.message} (code=${err.code})`);
+          });
+          mqttClient.subscribe(subOpts6).then(() => {
+            hilog.info(0x0000, 'TransportCore', `已订阅（周报分析）：${MQTT_TOPICS.weeklyReport}`);
+          }).catch((err: MqttBusinessError) => {
+            hilog.error(0x0000, 'TransportCore', `订阅周报主题失败：${err.message} (code=${err.code})`);
+          });
+          mqttClient.subscribe(subOpts7).then(() => {
+            hilog.info(0x0000, 'TransportCore', `已订阅（AI回答）：${MQTT_TOPICS.aiAnswer}`);
+          }).catch((err: MqttBusinessError) => {
+            hilog.error(0x0000, 'TransportCore', `订阅AI回答主题失败：${err.message} (code=${err.code})`);
           });
 
           // 序号3：向 query 发查询请求，触发服务器从数据库查并往 result 推
@@ -538,6 +639,42 @@ function parseDeviceSwitchStatus(dataStr: string): void {
   }
 }
 
+function parseWeeklyReportPayload(dataStr: string): void {
+  try {
+    const data = JSON.parse(dataStr) as WeeklyReportPayload;
+    const model: WeeklyReportModel = {
+      code: typeof data.code === 'number' ? data.code : 0,
+      device_id: typeof data.device_id === 'string' ? data.device_id : '',
+      report: typeof data.report === 'string' ? data.report : '',
+      timestamp: typeof data.timestamp === 'string' ? data.timestamp : '',
+      data_period: typeof data.data_period === 'string' ? data.data_period : ''
+    };
+    notifyWeeklyReport(model);
+    hilog.info(0x0000, 'TransportCore',
+      `✅ 周报已解析：code=${model.code} period=${model.data_period}`);
+  } catch (err) {
+    hilog.error(0x0000, 'TransportCore', `解析周报消息失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function parseAiAnswerPayload(dataStr: string): void {
+  try {
+    const data = JSON.parse(dataStr) as AiAnswerPayload;
+    const model: AiAnswerModel = {
+      code: typeof data.code === 'number' ? data.code : 0,
+      device_id: typeof data.device_id === 'string' ? data.device_id : '',
+      question: typeof data.question === 'string' ? data.question : '',
+      answer: typeof data.answer === 'string' ? data.answer : '',
+      timestamp: typeof data.timestamp === 'string' ? data.timestamp : ''
+    };
+    notifyAiAnswer(model);
+    hilog.info(0x0000, 'TransportCore',
+      `✅ AI回答已解析：code=${model.code} device=${model.device_id} time=${model.timestamp}`);
+  } catch (err) {
+    hilog.error(0x0000, 'TransportCore', `解析AI回答消息失败：${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 function notifyDeviceControlStateChanged(): void {
   const nextState: ControlStatusModel = {
     lightBright: controlStatus.lightBright,
@@ -637,6 +774,44 @@ export function requestLatestSensorData(): void {
     hilog.info(0x0000, 'TransportCore', '已发送最新传感器数据查询请求');
   }).catch((err: MqttBusinessError) => {
     hilog.error(0x0000, 'TransportCore', `请求最新传感器数据失败：${err.message ?? ''} (code=${err.code ?? ''})`);
+  });
+}
+
+export function sendAiQuestion(
+  question: string,
+  timestamp: string,
+  onSuccess?: () => void,
+  onFail?: (msg: string) => void
+): void {
+  const text: string = question.trim();
+  if (text.length === 0) {
+    onFail?.('问题不能为空');
+    return;
+  }
+  if (!isConnected || !mqttClient) {
+    const errMsg: string = 'MQTT未连接，无法发送AI问题';
+    hilog.warn(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+    return;
+  }
+  const payload: AiQuestionPayload = {
+    device_id: SERVER_CONFIG.deviceId,
+    question: text,
+    timestamp: timestamp
+  };
+  const payloadStr: string = JSON.stringify(payload);
+  const pubOpts: MqttPublishOptions = {
+    topic: MQTT_TOPICS.aiQuestion,
+    payload: payloadStr,
+    qos: 1
+  };
+  mqttClient.publish(pubOpts).then(() => {
+    hilog.info(0x0000, 'TransportCore', `✅ AI问题发送成功：${payloadStr}`);
+    onSuccess?.();
+  }).catch((err: MqttBusinessError) => {
+    const errMsg: string = `发送AI问题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
+    hilog.error(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
   });
 }
 

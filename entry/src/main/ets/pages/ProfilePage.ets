@@ -52,6 +52,9 @@ export struct ProfilePage {
           .borderRadius(12)
 
           // 菜单列表
+          this.MenuItem('AI农技问答', '问题诊断与建议', () => {
+            this.pathStack.pushPathByName('AiQaPage', null, false);
+          })
           this.MenuItem('关于', '版本与说明');
         }
         .width('100%')
@@ -69,7 +72,7 @@ export struct ProfilePage {
   }
 
   @Builder
-  MenuItem(title: string, subtitle: string) {
+  MenuItem(title: string, subtitle: string, onPress?: () => void) {
     Row() {
       Column({ space: 2 }) {
         Text(title)
@@ -87,6 +90,10 @@ export struct ProfilePage {
     .padding({ left: 16, right: 16 })
     .backgroundColor(Color.White)
     .borderRadius(12)
-      .onClick(() => {})
+    .onClick(() => {
+      if (onPress) {
+        onPress();
+      }
+    })
   }
 }
