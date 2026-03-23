@@ -204,6 +204,22 @@ interface AiAnswerPayload {
   code?: number;
 }
 
+interface PendingAiQuestionItem {
+  question: string;
+  sentAt: number;
+}
+
+interface PerfSampleItem {
+  costMs: number;
+  timeout: boolean;
+}
+
+interface PerfWindowStat {
+  name: string;
+  windowSize: number;
+  samples: PerfSampleItem[];
+}
+
 export const SERVER_CONFIG: ServerConfig = {
   mqttIP: '115.175.12.81',       
   mqttPort: 1883,               
@@ -302,6 +318,65 @@ let deviceControlStateListeners: Set<DeviceControlStateListener> = new Set<Devic
 let deviceSwitchReportListeners: Set<DeviceSwitchReportListener> = new Set<DeviceSwitchReportListener>();
 let weeklyReportListeners: Set<WeeklyReportListener> = new Set<WeeklyReportListener>();
 let aiAnswerListeners: Set<AiAnswerListener> = new Set<AiAnswerListener>();
+let weeklyReportTopicSubscribed: boolean = false;
+let aiAnswerTopicSubscribed: boolean = false;
+let pendingLatestSensorReqAt: number = 0;
+let pendingControlCommandAt: number = 0;
+let pendingDeviceActionAt: Map<DeviceType, number> = new Map<DeviceType, number>();
+let pendingAiQuestionQueue: Array<PendingAiQuestionItem> = [];
+const PERF_WINDOW_SIZE: number = 50;
+let sensorQueryPerfWindow: PerfWindowStat = {
+  name: 'MQTT-传感器查询',
+  windowSize: PERF_WINDOW_SIZE,
+  samples: []
+};
+let controlExecPerfWindow: PerfWindowStat = {
+  name: 'MQTT-控制执行结果',
+  windowSize: PERF_WINDOW_SIZE,
+  samples: []
+};
+let deviceActionPerfWindow: PerfWindowStat = {
+  name: 'MQTT-设备动作',
+  windowSize: PERF_WINDOW_SIZE,
+  samples: []
+};
+let aiQaPerfWindow: PerfWindowStat = {
+  name: 'MQTT-AI问答',
+  windowSize: PERF_WINDOW_SIZE,
+  samples: []
+};
+
+function recordPerfWindowSample(window: PerfWindowStat, costMs: number, timeout: boolean): void {
+  const sample: PerfSampleItem = {
+    costMs: costMs,
+    timeout: timeout
+  };
+  window.samples.push(sample);
+  if (window.samples.length > window.windowSize) {
+    window.samples.shift();
+  }
+  const count: number = window.samples.length;
+  if (count <= 0) {
+    return;
+  }
+  let total: number = 0;
+  let timeoutCount: number = 0;
+  const costList: number[] = [];
+  for (let i: number = 0; i < count; i++) {
+    total = total + window.samples[i].costMs;
+    if (window.samples[i].timeout) {
+      timeoutCount = timeoutCount + 1;
+    }
+    costList.push(window.samples[i].costMs);
+  }
+  costList.sort((a: number, b: number): number => a - b);
+  const avg: number = total / count;
+  const p95Index: number = Math.max(0, Math.ceil(count * 0.95) - 1);
+  const p95: number = costList[p95Index];
+  const timeoutRate: number = (timeoutCount * 100) / count;
+  hilog.info(0x0000, 'TransportCore',
+    `📊 ${window.name} 最近${count}/${window.windowSize}次: avg=${avg.toFixed(1)}ms p95=${p95}ms timeoutRate=${timeoutRate.toFixed(1)}%`);
+}
 
 export function registerSensorDataListener(listener?: SensorDataListener): void {
   sensorDataListener = listener;
@@ -351,6 +426,100 @@ export function registerAiAnswerListener(listener: AiAnswerListener): void {
 
 export function unregisterAiAnswerListener(listener: AiAnswerListener): void {
   aiAnswerListeners.delete(listener);
+}
+
+export function subscribeWeeklyReportTopic(onSuccess?: () => void, onFail?: (msg: string) => void): void {
+  if (weeklyReportTopicSubscribed) {
+    onSuccess?.();
+    return;
+  }
+  if (!isConnected || !mqttClient) {
+    const errMsg: string = 'MQTT未连接，无法订阅周报主题';
+    hilog.warn(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+    return;
+  }
+  const subOpts: MqttSubscribeOptions = { topic: MQTT_TOPICS.weeklyReport, qos: 1 };
+  mqttClient.subscribe(subOpts).then(() => {
+    weeklyReportTopicSubscribed = true;
+    hilog.info(0x0000, 'TransportCore', `已订阅（周报分析）：${MQTT_TOPICS.weeklyReport}`);
+    onSuccess?.();
+  }).catch((err: MqttBusinessError) => {
+    const errMsg: string = `订阅周报主题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
+    hilog.error(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+  });
+}
+
+export function unsubscribeWeeklyReportTopic(onSuccess?: () => void, onFail?: (msg: string) => void): void {
+  if (!weeklyReportTopicSubscribed) {
+    onSuccess?.();
+    return;
+  }
+  if (!mqttClient) {
+    weeklyReportTopicSubscribed = false;
+    onSuccess?.();
+    return;
+  }
+  const subOpts: MqttSubscribeOptions = { topic: MQTT_TOPICS.weeklyReport, qos: 1 };
+  mqttClient.unsubscribe(subOpts).then(() => {
+    weeklyReportTopicSubscribed = false;
+    hilog.info(0x0000, 'TransportCore', `已退订（周报分析）：${MQTT_TOPICS.weeklyReport}`);
+    onSuccess?.();
+  }).catch((err: MqttBusinessError) => {
+    const errMsg: string = `退订周报主题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
+    hilog.error(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+  });
+}
+
+export function subscribeAiAnswerTopic(onSuccess?: () => void, onFail?: (msg: string) => void): void {
+  if (aiAnswerTopicSubscribed) {
+    onSuccess?.();
+    return;
+  }
+  if (!isConnected || !mqttClient) {
+    const errMsg: string = 'MQTT未连接，无法订阅AI回答主题';
+    hilog.warn(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+    return;
+  }
+  const subOpts: MqttSubscribeOptions = { topic: MQTT_TOPICS.aiAnswer, qos: 1 };
+  mqttClient.subscribe(subOpts).then(() => {
+    aiAnswerTopicSubscribed = true;
+    hilog.info(0x0000, 'TransportCore', `已订阅（AI回答）：${MQTT_TOPICS.aiAnswer}`);
+    onSuccess?.();
+  }).catch((err: MqttBusinessError) => {
+    const errMsg: string = `订阅AI回答主题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
+    hilog.error(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+  });
+}
+
+export function unsubscribeAiAnswerTopic(onSuccess?: () => void, onFail?: (msg: string) => void): void {
+  if (!aiAnswerTopicSubscribed) {
+    onSuccess?.();
+    return;
+  }
+  if (!mqttClient) {
+    aiAnswerTopicSubscribed = false;
+    onSuccess?.();
+    return;
+  }
+  const subOpts: MqttSubscribeOptions = { topic: MQTT_TOPICS.aiAnswer, qos: 1 };
+  mqttClient.unsubscribe(subOpts).then(() => {
+    aiAnswerTopicSubscribed = false;
+    hilog.info(0x0000, 'TransportCore', `已退订（AI回答）：${MQTT_TOPICS.aiAnswer}`);
+    onSuccess?.();
+  }).catch((err: MqttBusinessError) => {
+    const errMsg: string = `退订AI回答主题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
+    hilog.error(0x0000, 'TransportCore', errMsg);
+    onFail?.(errMsg);
+  });
+}
+
+export function reportAiQaTimeout(timeoutMs: number): void {
+  recordPerfWindowSample(aiQaPerfWindow, timeoutMs, true);
 }
 
 function notifyWeeklyReport(data: WeeklyReportModel): void {
@@ -437,10 +606,14 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
         keepAliveInterval: 60,
         cleanSession: false
       };
+      const connectStartAt: number = Date.now();
+      hilog.info(0x0000, 'TransportCore', '开始MQTT连接...');
 
       mqttClient.connect(connectOpts).then((_res: MqttResponse) => {
+        const connectCostMs: number = Date.now() - connectStartAt;
         isConnected = true;
-        hilog.info(0x0000, 'TransportCore', `✅ MQTT连接成功（${SERVER_CONFIG.mqttIP}:${SERVER_CONFIG.mqttPort}）`);
+        hilog.info(0x0000, 'TransportCore',
+          `✅ MQTT连接成功（${SERVER_CONFIG.mqttIP}:${SERVER_CONFIG.mqttPort}）| 连接耗时=${connectCostMs}ms`);
         onSuccess?.();
 
         // 订阅 result：收服务器返回的查询数据（序号4）
@@ -450,8 +623,6 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
           const subOpts3: MqttSubscribeOptions = { topic: MQTT_TOPICS.deviceStatus, qos: 1 };
           const subOpts4: MqttSubscribeOptions = { topic: MQTT_TOPICS.controlCmd, qos: 1 };
           const subOpts5: MqttSubscribeOptions = { topic: MQTT_TOPICS.deviceSwitchStatus, qos: 1 };
-          const subOpts6: MqttSubscribeOptions = { topic: MQTT_TOPICS.weeklyReport, qos: 1 };
-          const subOpts7: MqttSubscribeOptions = { topic: MQTT_TOPICS.aiAnswer, qos: 1 };
           mqttClient.subscribe(subOpts1).then(() => {
             hilog.info(0x0000, 'TransportCore', `已订阅（收数据）：${MQTT_TOPICS.sensorData}`);
           }).catch((err: MqttBusinessError) => {
@@ -477,16 +648,6 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
           }).catch((err: MqttBusinessError) => {
             hilog.error(0x0000, 'TransportCore', `订阅设备开关状态主题失败：${err.message} (code=${err.code})`);
           });
-          mqttClient.subscribe(subOpts6).then(() => {
-            hilog.info(0x0000, 'TransportCore', `已订阅（周报分析）：${MQTT_TOPICS.weeklyReport}`);
-          }).catch((err: MqttBusinessError) => {
-            hilog.error(0x0000, 'TransportCore', `订阅周报主题失败：${err.message} (code=${err.code})`);
-          });
-          mqttClient.subscribe(subOpts7).then(() => {
-            hilog.info(0x0000, 'TransportCore', `已订阅（AI回答）：${MQTT_TOPICS.aiAnswer}`);
-          }).catch((err: MqttBusinessError) => {
-            hilog.error(0x0000, 'TransportCore', `订阅AI回答主题失败：${err.message} (code=${err.code})`);
-          });
 
           // 序号3：向 query 发查询请求，触发服务器从数据库查并往 result 推
           const requestPayload = JSON.stringify({
@@ -499,6 +660,7 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
             qos: 1
           }).then(() => {
             hilog.info(0x0000, 'TransportCore', '已向 query 发送查询请求，等待 result 返回数据');
+            pendingLatestSensorReqAt = Date.now();
           }).catch((err: MqttBusinessError) => {
             hilog.error(0x0000, 'TransportCore', `发送查询请求失败：${err.message ?? ''} (code=${err.code ?? ''})`);
           });
@@ -506,8 +668,9 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
 
         uploadCachedCommands();
       }).catch((err: MqttBusinessError) => {
+        const connectCostMs: number = Date.now() - connectStartAt;
         isConnected = false;
-        const errMsg = `❌ MQTT连接失败：${err.message ?? String(err)}${err.code ? ` (code=${err.code})` : ''}`;
+        const errMsg = `❌ MQTT连接失败：${err.message ?? String(err)}${err.code ? ` (code=${err.code})` : ''} | 连接耗时=${connectCostMs}ms`;
         hilog.error(0x0000, 'TransportCore', errMsg);
         onFail?.(errMsg);
       });
@@ -532,6 +695,12 @@ export function initMqttConnection(context: common.Context, onSuccess?: () => vo
 // 失败: { code: 500, msg: "查询失败: 无该设备数据" }
 function parseSensorData(dataStr: string): void {
   try {
+    if (pendingLatestSensorReqAt > 0) {
+      const costMs: number = Date.now() - pendingLatestSensorReqAt;
+      hilog.info(0x0000, 'TransportCore', `⏱ 查询最新传感器数据响应耗时：${costMs}ms`);
+      recordPerfWindowSample(sensorQueryPerfWindow, costMs, false);
+      pendingLatestSensorReqAt = 0;
+    }
     const root = JSON.parse(dataStr) as SensorResponsePayload;
     if (root.code !== 200) {
       hilog.warn(0x0000, 'TransportCore', `result 失败/无数据: code=${root.code}, msg=${root.msg ?? ''}`);
@@ -556,6 +725,12 @@ function parseSensorData(dataStr: string): void {
 // ==================== 解析执行结果 =====================
 function parseExecResult(dataStr: string): void {
   try {
+    if (pendingControlCommandAt > 0) {
+      const costMs: number = Date.now() - pendingControlCommandAt;
+      hilog.info(0x0000, 'TransportCore', `⏱ 控制指令执行结果返回耗时：${costMs}ms`);
+      recordPerfWindowSample(controlExecPerfWindow, costMs, false);
+      pendingControlCommandAt = 0;
+    }
     const data = JSON.parse(dataStr) as ExecResultPayload;
     execResult.code = data.code || 200;
     execResult.message = data.status || "success";
@@ -618,6 +793,13 @@ function parseDeviceSwitchStatus(dataStr: string): void {
     }
     const deviceType: DeviceType = deviceTypeRaw as DeviceType;
     const status: DeviceAction = statusRaw as DeviceAction;
+    const deviceActionSentAt: number | undefined = pendingDeviceActionAt.get(deviceType);
+    if (deviceActionSentAt !== undefined) {
+      const costMs: number = Date.now() - deviceActionSentAt;
+      hilog.info(0x0000, 'TransportCore', `⏱ 设备动作响应耗时：type=${deviceType} cost=${costMs}ms`);
+      recordPerfWindowSample(deviceActionPerfWindow, costMs, false);
+      pendingDeviceActionAt.delete(deviceType);
+    }
     const isOn: boolean = status === 'on';
     if (deviceType === 'light') {
       controlStatus.lightBright = isOn ? 100 : 0;
@@ -660,6 +842,26 @@ function parseWeeklyReportPayload(dataStr: string): void {
 function parseAiAnswerPayload(dataStr: string): void {
   try {
     const data = JSON.parse(dataStr) as AiAnswerPayload;
+    const answerQuestion: string = typeof data.question === 'string' ? data.question : '';
+    let queueIndex: number = -1;
+    if (answerQuestion.length > 0) {
+      for (let i: number = 0; i < pendingAiQuestionQueue.length; i++) {
+        if (pendingAiQuestionQueue[i].question === answerQuestion) {
+          queueIndex = i;
+          break;
+        }
+      }
+    }
+    if (queueIndex === -1 && pendingAiQuestionQueue.length > 0) {
+      queueIndex = 0;
+    }
+    if (queueIndex >= 0 && queueIndex < pendingAiQuestionQueue.length) {
+      const sentAt: number = pendingAiQuestionQueue[queueIndex].sentAt;
+      const costMs: number = Date.now() - sentAt;
+      hilog.info(0x0000, 'TransportCore', `⏱ AI问答响应耗时：${costMs}ms`);
+      recordPerfWindowSample(aiQaPerfWindow, costMs, false);
+      pendingAiQuestionQueue.splice(queueIndex, 1);
+    }
     const model: AiAnswerModel = {
       code: typeof data.code === 'number' ? data.code : 0,
       device_id: typeof data.device_id === 'string' ? data.device_id : '',
@@ -710,6 +912,7 @@ export function sendControlCommand(light: number, pump: number, valve: boolean) 
     };
     mqttClient.publish(pubOpts).then(() => {
       hilog.info(0x0000, 'TransportCore', `✅ 发送控制指令成功：${cmdStr}`);
+    pendingControlCommandAt = Date.now();
     }).catch((err: MqttBusinessError) => {
       hilog.error(0x0000, 'TransportCore', `发送指令失败：${err.message} (code=${err.code})`);
       cacheControlCommand(cmdStr);
@@ -744,6 +947,7 @@ export function sendDeviceActionCommand(
   };
   mqttClient.publish(pubOpts).then(() => {
     hilog.info(0x0000, 'TransportCore', `✅ 发送设备指令成功：topic=${MQTT_TOPICS.controlCmd} payload=${cmdStr}`);
+    pendingDeviceActionAt.set(deviceType, Date.now());
     onSuccess?.();
   }).catch((err: MqttBusinessError) => {
     const errMsg: string = `发送设备指令失败：${err.message ?? ''} (code=${err.code ?? ''})`;
@@ -772,6 +976,7 @@ export function requestLatestSensorData(): void {
     qos: 1
   }).then(() => {
     hilog.info(0x0000, 'TransportCore', '已发送最新传感器数据查询请求');
+    pendingLatestSensorReqAt = Date.now();
   }).catch((err: MqttBusinessError) => {
     hilog.error(0x0000, 'TransportCore', `请求最新传感器数据失败：${err.message ?? ''} (code=${err.code ?? ''})`);
   });
@@ -807,6 +1012,11 @@ export function sendAiQuestion(
   };
   mqttClient.publish(pubOpts).then(() => {
     hilog.info(0x0000, 'TransportCore', `✅ AI问题发送成功：${payloadStr}`);
+    const queueItem: PendingAiQuestionItem = {
+      question: text,
+      sentAt: Date.now()
+    };
+    pendingAiQuestionQueue.push(queueItem);
     onSuccess?.();
   }).catch((err: MqttBusinessError) => {
     const errMsg: string = `发送AI问题失败：${err.message ?? ''} (code=${err.code ?? ''})`;
@@ -888,15 +1098,25 @@ export function getDeviceControlState(): ControlStatusModel {
 
 // =====================  断开MQTT连接 =====================
 export function disconnectMqtt(): void {
+  const disconnectStartAt: number = Date.now();
+  hilog.info(0x0000, 'TransportCore', '开始断开MQTT连接...');
   isConnected = false;
   deviceOnline = false;
+  weeklyReportTopicSubscribed = false;
+  aiAnswerTopicSubscribed = false;
   notifyDeviceStatusChanged(deviceOnline, deviceStatusTime);
   if (mqttClient) {
     mqttClient.disconnect().then(() => {
-      hilog.info(0x0000, 'TransportCore', '✅ MQTT已断开');
+      const disconnectCostMs: number = Date.now() - disconnectStartAt;
+      hilog.info(0x0000, 'TransportCore', `✅ MQTT已断开 | 断开耗时=${disconnectCostMs}ms`);
     }).catch((err: MqttBusinessError) => {
-      hilog.error(0x0000, 'TransportCore', `断开MQTT失败：${err.message} (code=${err.code})`);
+      const disconnectCostMs: number = Date.now() - disconnectStartAt;
+      hilog.error(0x0000, 'TransportCore',
+        `断开MQTT失败：${err.message} (code=${err.code}) | 断开耗时=${disconnectCostMs}ms`);
     });
     mqttClient = null;
+  } else {
+    const disconnectCostMs: number = Date.now() - disconnectStartAt;
+    hilog.info(0x0000, 'TransportCore', `MQTT客户端为空，视为已断开 | 断开耗时=${disconnectCostMs}ms`);
   }
 }

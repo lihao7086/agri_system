@@ -1,4 +1,5 @@
 import hilog from '@ohos.hilog';
+import common from '@ohos.app.ability.common';
 import {
   AvgItemModel,
   HTTP_SERVER_CONFIG,
@@ -6,8 +7,13 @@ import {
   SevenDaysAvgModel
 } from './http';
 import {
+  disconnectMqtt as mqttDisconnect,
+  getMqttStatus,
+  initMqttConnection as mqttInit,
   registerWeeklyReportListener,
+  subscribeWeeklyReportTopic,
   unregisterWeeklyReportListener,
+  unsubscribeWeeklyReportTopic,
   WeeklyReportListener,
   WeeklyReportModel
 } from './mqtt';
@@ -54,6 +60,7 @@ struct TrendPage {
   @State weeklyReportTimestamp: string = '';
   @State weeklyReportDeviceId: string = '';
   private weeklyReportListener: WeeklyReportListener | undefined = undefined;
+  private autoConnectedMqtt: boolean = false;
 
   private readonly metrics: TrendMetricOption[] = [
     { key: 'tempAvg', title: '温度', unit: '°C', color: '#FF7043' },
@@ -74,9 +81,26 @@ struct TrendPage {
       this.weeklyDataPeriod = data.data_period;
     };
     registerWeeklyReportListener(this.weeklyReportListener);
+    const connected: boolean = getMqttStatus();
+    if (connected) {
+      subscribeWeeklyReportTopic();
+      return;
+    }
+    const context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    mqttInit(context, () => {
+      this.autoConnectedMqtt = true;
+      subscribeWeeklyReportTopic();
+    }, (_msg: string) => {
+      hilog.warn(0x0000, 'TrendPage', '自动连接MQTT失败，周报订阅未建立');
+    });
   }
 
   aboutToDisappear(): void {
+    unsubscribeWeeklyReportTopic();
+    if (this.autoConnectedMqtt) {
+      mqttDisconnect();
+      this.autoConnectedMqtt = false;
+    }
     if (this.weeklyReportListener !== undefined) {
       unregisterWeeklyReportListener(this.weeklyReportListener);
       this.weeklyReportListener = undefined;
@@ -94,6 +118,24 @@ struct TrendPage {
   private getItemDateText(rawDate: string): string {
     // 兼容 "YYYY-MM-DD" 或 "YYYY-MM-DD HH:mm:ss"
     return rawDate.length >= 10 ? rawDate.substring(0, 10) : rawDate;
+  }
+
+  private formatMarkdownText(content: string): string {
+    let text: string = content.replace(/\r\n/g, '\n');
+    text = text.replace(/^#{1,6}\s*/gm, '');
+    text = text.replace(/\*\*(.*?)\*\*/g, '$1');
+    text = text.replace(/\*(.*?)\*/g, '$1');
+    text = text.replace(/`([^`]+)`/g, '$1');
+    text = text.replace(/^\s*[-*+]\s+/gm, '• ');
+    text = text.replace(/^\s*\d+\.\s+/gm, '• ');
+    text = text.replace(/^>\s?/gm, '');
+    text = text.replace(/\[(.*?)\]\((.*?)\)/g, '$1 ($2)');
+    text = text.replace(/\n{3,}/g, '\n\n');
+    return text.trim();
+  }
+
+  private getWeeklyReportDisplayText(): string {
+    return this.formatMarkdownText(this.weeklyReportText);
   }
 
   async queryTrendData(): Promise<void> {
@@ -433,7 +475,7 @@ struct TrendPage {
                 }
 
                 if (this.weeklyReportText.length > 0) {
-                  Text(this.weeklyReportText)
+                  Text(this.getWeeklyReportDisplayText())
                     .fontSize(14)
                     .fontColor('#333333')
                     .lineHeight(22)

@@ -81,9 +81,26 @@ interface SevenDaysAvgResponsePayload {
   timestamp?: string;
 }
 
+interface HttpPerfSampleItem {
+  costMs: number;
+  timeout: boolean;
+}
+
+interface HttpPerfWindowStat {
+  name: string;
+  windowSize: number;
+  samples: HttpPerfSampleItem[];
+}
+
 export const HTTP_SERVER_CONFIG: HttpServerConfig = {
   baseUrl: 'http://115.175.12.81:8080',
   deviceId: 'hi3861_001'
+};
+const HTTP_PERF_WINDOW_SIZE: number = 50;
+let httpPerfWindow: HttpPerfWindowStat = {
+  name: 'HTTP-GET',
+  windowSize: HTTP_PERF_WINDOW_SIZE,
+  samples: []
 };
 
 function buildUrl(path: string, query: string): string {
@@ -93,20 +110,71 @@ function buildUrl(path: string, query: string): string {
   return `${HTTP_SERVER_CONFIG.baseUrl}${path}?${query}`;
 }
 
+function getNowTimeText(): string {
+  const now: Date = new Date();
+  const year: number = now.getFullYear();
+  const month: string = String(now.getMonth() + 1).padStart(2, '0');
+  const day: string = String(now.getDate()).padStart(2, '0');
+  const hour: string = String(now.getHours()).padStart(2, '0');
+  const minute: string = String(now.getMinutes()).padStart(2, '0');
+  const second: string = String(now.getSeconds()).padStart(2, '0');
+  const ms: string = String(now.getMilliseconds()).padStart(3, '0');
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}.${ms}`;
+}
+
+function recordHttpPerfSample(costMs: number, timeout: boolean): void {
+  const sample: HttpPerfSampleItem = {
+    costMs: costMs,
+    timeout: timeout
+  };
+  httpPerfWindow.samples.push(sample);
+  if (httpPerfWindow.samples.length > httpPerfWindow.windowSize) {
+    httpPerfWindow.samples.shift();
+  }
+  const count: number = httpPerfWindow.samples.length;
+  if (count <= 0) {
+    return;
+  }
+  let total: number = 0;
+  let timeoutCount: number = 0;
+  const costList: number[] = [];
+  for (let i: number = 0; i < count; i++) {
+    total = total + httpPerfWindow.samples[i].costMs;
+    if (httpPerfWindow.samples[i].timeout) {
+      timeoutCount = timeoutCount + 1;
+    }
+    costList.push(httpPerfWindow.samples[i].costMs);
+  }
+  costList.sort((a: number, b: number): number => a - b);
+  const avg: number = total / count;
+  const p95Index: number = Math.max(0, Math.ceil(count * 0.95) - 1);
+  const p95: number = costList[p95Index];
+  const timeoutRate: number = (timeoutCount * 100) / count;
+  hilog.info(0x0000, 'HttpData',
+    `📊 ${httpPerfWindow.name} 最近${count}/${httpPerfWindow.windowSize}次: avg=${avg.toFixed(1)}ms p95=${p95}ms timeoutRate=${timeoutRate.toFixed(1)}%`);
+}
+
 function doGet(url: string): Promise<string> {
   return new Promise((resolve: (value: string) => void, reject: (reason?: Error) => void) => {
     const req: http.HttpRequest = http.createHttp();
-    hilog.info(0x0000, 'HttpData', `开始HTTP请求: ${url}`);
+    const requestStartAt: number = Date.now();
+    const requestStartText: string = getNowTimeText();
+    hilog.info(0x0000, 'HttpData', `开始HTTP请求: ${url} | 请求时间=${requestStartText}`);
     req.request(url, {
       method: http.RequestMethod.GET,
       expectDataType: http.HttpDataType.STRING,
-      connectTimeout: 5000,
-      readTimeout: 5000,
+      connectTimeout: 3000,
+      readTimeout: 3000,
       header: {
         'Content-Type': 'application/json'
       }
     }).then((resp: http.HttpResponse) => {
-      hilog.info(0x0000, 'HttpData', `HTTP响应码: ${resp.responseCode}`);
+      const responseAt: number = Date.now();
+      const responseText: string = getNowTimeText();
+      const costMs: number = responseAt - requestStartAt;
+      recordHttpPerfSample(costMs, false);
+      hilog.info(0x0000, 'HttpData',
+        `HTTP响应码: ${resp.responseCode} | 接收时间=${responseText} | 耗时=${costMs}ms`);
       if (resp.responseCode !== 200) {
         req.destroy();
         reject(new Error(`HTTP状态异常: ${resp.responseCode}`));
@@ -117,8 +185,15 @@ function doGet(url: string): Promise<string> {
       req.destroy();
       resolve(text);
     }).catch((err: BusinessError) => {
+      const failAt: number = Date.now();
+      const failText: string = getNowTimeText();
+      const costMs: number = failAt - requestStartAt;
+      const errMsgLower: string = (err.message ?? '').toLowerCase();
+      const timeoutLike: boolean = errMsgLower.includes('timeout') || errMsgLower.includes('timed out');
+      recordHttpPerfSample(costMs, timeoutLike);
       req.destroy();
-      hilog.error(0x0000, 'HttpData', `HTTP请求失败: ${err.message} code=${err.code}`);
+      hilog.error(0x0000, 'HttpData',
+        `HTTP请求失败: ${err.message} code=${err.code} | 失败时间=${failText} | 耗时=${costMs}ms`);
       reject(new Error(`HTTP GET失败: ${err.message} code=${err.code}`));
     });
   });

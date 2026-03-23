@@ -93,6 +93,9 @@ struct VentilationControlPage {
   @State deviceOnline: boolean = false;
   @State deviceStatusTime: string = '';
   @State executeResult: string = '未执行';
+  @State smartDurationMinutes: number = 60;
+  @State selectedDurationKey: string = '1h';
+  @State customDurationInput: string = '';
 
   aboutToAppear(): void {
     const controlState: ControlStatusModel = getDeviceControlState();
@@ -142,6 +145,53 @@ struct VentilationControlPage {
     this.confirmSmartVentilationStart();
   }
 
+  onDurationSelect(hours: number): void {
+    this.selectedDurationKey = `${hours}h`;
+    this.customDurationInput = '';
+    this.smartDurationMinutes = hours * 60;
+  }
+
+  onCustomDurationSelect(): void {
+    this.selectedDurationKey = 'custom';
+    if (this.customDurationInput.length === 0) {
+      this.customDurationInput = '1';
+      this.smartDurationMinutes = 60;
+      return;
+    }
+    this.onCustomDurationInputChange(this.customDurationInput);
+  }
+
+  onCustomDurationInputChange(value: string): void {
+    let digits: string = '';
+    for (let i: number = 0; i < value.length; i++) {
+      const ch: string = value[i];
+      if (ch >= '0' && ch <= '9') {
+        digits = `${digits}${ch}`;
+      }
+    }
+    if (digits.length === 0) {
+      this.customDurationInput = '';
+      return;
+    }
+    let hours: number = parseInt(digits, 10);
+    if (Number.isNaN(hours)) {
+      hours = 1;
+    }
+    if (hours < 1) {
+      hours = 1;
+    }
+    if (hours > 24) {
+      hours = 24;
+    }
+    this.customDurationInput = `${hours}`;
+    this.smartDurationMinutes = hours * 60;
+    this.selectedDurationKey = 'custom';
+  }
+
+  getDurationText(): string {
+    return `${Math.floor(this.smartDurationMinutes / 60)}h`;
+  }
+
   confirmFanToggle(targetOn: boolean): void {
     const actionText: string = targetOn ? '开启' : '关闭';
     AlertDialog.show({
@@ -165,7 +215,7 @@ struct VentilationControlPage {
   confirmSmartVentilationStart(): void {
     AlertDialog.show({
       title: '提示',
-      message: '确认开启智能通风吗？',
+      message: `确认开启智能通风吗？\n控制时长：${this.getDurationText()}`,
       primaryButton: {
         value: '确认',
         action: () => {
@@ -273,6 +323,102 @@ struct VentilationControlPage {
         .backgroundColor(Color.White)
         .borderRadius(12)
         .alignItems(VerticalAlign.Center)
+
+        Column({ space: 10 }) {
+          Row() {
+            Text('控制时长设定')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#333333')
+            Blank()
+            Row() {
+              Text(this.getDurationText())
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(Color.White)
+            }
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .backgroundColor('#424242')
+            .borderRadius(8)
+          }
+          .width('100%')
+
+          Row() {
+            Text('1h')
+                .fontSize(13)
+                .textAlign(TextAlign.Center)
+                .fontColor(this.selectedDurationKey === '1h' ? Color.White : '#666666')
+                .width('22%')
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .backgroundColor(this.selectedDurationKey === '1h' ? '#2E7D32' : '#F1F3F5')
+                .borderRadius(14)
+                .onClick(() => {
+                  this.onDurationSelect(1);
+                })
+            Text('2h')
+              .fontSize(13)
+              .textAlign(TextAlign.Center)
+              .fontColor(this.selectedDurationKey === '2h' ? Color.White : '#666666')
+              .width('22%')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.selectedDurationKey === '2h' ? '#2E7D32' : '#F1F3F5')
+              .borderRadius(14)
+              .onClick(() => {
+                this.onDurationSelect(2);
+              })
+            Text('3h')
+              .fontSize(13)
+              .textAlign(TextAlign.Center)
+              .fontColor(this.selectedDurationKey === '3h' ? Color.White : '#666666')
+              .width('22%')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.selectedDurationKey === '3h' ? '#2E7D32' : '#F1F3F5')
+              .borderRadius(14)
+              .onClick(() => {
+                this.onDurationSelect(3);
+              })
+            Text('自定义')
+              .fontSize(13)
+              .textAlign(TextAlign.Center)
+              .fontColor(this.selectedDurationKey === 'custom' ? Color.White : '#666666')
+              .width('22%')
+              .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+              .backgroundColor(this.selectedDurationKey === 'custom' ? '#2E7D32' : '#F1F3F5')
+              .borderRadius(14)
+              .onClick(() => {
+                this.onCustomDurationSelect();
+              })
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.SpaceBetween)
+
+          if (this.selectedDurationKey === 'custom') {
+            Row({ space: 8 }) {
+              Text('输入时长')
+                .fontSize(13)
+                .fontColor('#666666')
+              TextInput({ placeholder: '1~24', text: this.customDurationInput })
+                .width(86)
+                .height(34)
+                .fontSize(13)
+                .backgroundColor('#F7F7F7')
+                .borderRadius(8)
+                .onChange((value: string) => {
+                  this.onCustomDurationInputChange(value);
+                })
+              Text('h')
+                .fontSize(13)
+                .fontColor('#666666')
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+          }
+        }
+        .width('100%')
+        .padding(16)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .alignItems(HorizontalAlign.Start)
 
         Button('开启智能通风')
           .width('100%')

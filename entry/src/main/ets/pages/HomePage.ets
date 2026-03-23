@@ -55,6 +55,8 @@ interface WarningStateItem {
   level: WarningLevel;
 }
 
+const AI_INTERVENTION_COOLDOWN_MS: number = 60000;
+
 @Component
 export struct HomePage {
   pathStack: NavPathStack = new NavPathStack();
@@ -109,6 +111,11 @@ export struct HomePage {
     { name: '通风', isRunning: false, runningMinutes: 0, executeResult: '未执行' }
   ];
   @State warningStates: WarningStateItem[] = [];
+  @State showAiAssistantDrawer: boolean = false;
+  @State aiInterventionText: string = '';
+  @State aiInterventionQuestion: string = '';
+  @State aiInterventionAlerts: string[] = [];
+  private lastAiInterventionAt: number = 0;
 
   aboutToAppear(): void {
     this.loadThresholdConfigFromPreferences();
@@ -361,6 +368,109 @@ export struct HomePage {
 
         this.DeviceDialog()
       }
+
+      if (this.showAiAssistantDrawer) {
+        Row() {
+          Blank()
+            .layoutWeight(1)
+
+          Column({ space: 12 }) {
+            Row({ space: 8 }) {
+              Image($r('app.media.ai'))
+                .width(20)
+                .height(20)
+                .fillColor('#2E7D32')
+              Text('AI建议')
+                .fontSize(17)
+                .fontWeight(FontWeight.Medium)
+                .fontColor('#333333')
+              Blank()
+              Text('收起')
+                .fontSize(13)
+                .fontColor('#2E7D32')
+                .onClick(() => {
+                  this.closeAiAssistantDrawer();
+                })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+
+            if (this.aiInterventionAlerts.length > 0) {
+              Column({ space: 6 }) {
+                Text('检测到异常：')
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor('#666666')
+                  .width('100%')
+                ForEach(this.aiInterventionAlerts, (item: string) => {
+                  Text(`• ${item}`)
+                    .fontSize(13)
+                    .fontColor('#C62828')
+                    .lineHeight(20)
+                    .width('100%')
+                }, (item: string) => item)
+              }
+              .width('100%')
+            }
+
+            Text(this.aiInterventionText)
+              .fontSize(14)
+              .lineHeight(22)
+              .fontColor('#333333')
+              .width('100%')
+              .padding(10)
+              .backgroundColor('#F6F8FA')
+              .borderRadius(8)
+
+            Button('立即咨询AI')
+              .width('100%')
+              .height(42)
+              .fontSize(15)
+              .fontColor(Color.White)
+              .backgroundColor('#2E7D32')
+              .borderRadius(9)
+              .onClick(() => {
+                this.closeAiAssistantDrawer();
+                this.openAiQaPage(this.aiInterventionQuestion);
+              })
+          }
+          .width('78%')
+          .height('100%')
+          .padding(16)
+          .backgroundColor(Color.White)
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            // 拦截面板内部点击，避免触发蒙层关闭
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#4D000000')
+        .align(Alignment.TopStart)
+        .onClick(() => {
+          this.closeAiAssistantDrawer();
+        })
+      }
+
+      Row() {
+        Row() {
+          Image($r('app.media.ai'))
+            .width(28)
+            .height(28)
+            .fillColor(Color.White)
+        }
+        .padding(12)
+        .backgroundColor('#2E7D32')
+        .borderRadius(24)
+        .shadow({ radius: 12, color: '#30000000', offsetX: 0, offsetY: 4 })
+        .onClick(() => {
+          this.openAiAssistantDrawer();
+        })
+      }
+      .width('100%')
+      .padding({ right: 4, bottom: 22 })
+      .justifyContent(FlexAlign.End)
+      .align(Alignment.BottomStart)
     }
     .width('100%')
     .height('100%')
@@ -558,8 +668,9 @@ export struct HomePage {
     this.pathStack.pushPathByName('TrendPage', null, false);
   }
 
-  openAiQaPage(): void {
-    this.pathStack.pushPathByName('AiQaPage', null, false);
+  openAiQaPage(prefillQuestion?: string): void {
+    const param: string | null = prefillQuestion !== undefined && prefillQuestion.length > 0 ? prefillQuestion : null;
+    this.pathStack.pushPathByName('AiQaPage', param, false);
   }
 
   handleGatewayAction(): void {
@@ -794,6 +905,7 @@ export struct HomePage {
     ];
     const nextWarningStates: WarningStateItem[] = [];
     const nextAlerts: string[] = [];
+    const previousAlerts: string[] = this.alerts;
     for (let i: number = 0; i < metrics.length; i++) {
       const metric: ThresholdMetric = metrics[i];
       const value: number = values[i];
@@ -816,6 +928,74 @@ export struct HomePage {
     }
     this.warningStates = nextWarningStates;
     this.alerts = nextAlerts;
+    const previousAlertSet: Set<string> = new Set<string>();
+    for (let i: number = 0; i < previousAlerts.length; i++) {
+      previousAlertSet.add(previousAlerts[i]);
+    }
+    const newAlerts: string[] = [];
+    for (let i: number = 0; i < nextAlerts.length; i++) {
+      const item: string = nextAlerts[i];
+      if (!previousAlertSet.has(item)) {
+        newAlerts.push(item);
+      }
+    }
+    this.tryAutoAiIntervention(newAlerts);
+  }
+
+  private openAiAssistantDrawer(): void {
+    if (this.aiInterventionText.length === 0) {
+      this.aiInterventionText = '当前未检测到新的异常触发。你可以点击下方按钮，向 AI 咨询作物管理建议。';
+      this.aiInterventionQuestion = '请根据当前大棚环境给出巡检与调控建议。';
+    }
+    this.showAiAssistantDrawer = true;
+  }
+
+  private closeAiAssistantDrawer(): void {
+    this.showAiAssistantDrawer = false;
+  }
+
+  private buildAiQuestionFromAlerts(alerts: string[]): string {
+    let question: string = '请根据以下异常给出优先级处理建议：';
+    for (let i: number = 0; i < alerts.length; i++) {
+      question = `${question}\n${i + 1}. ${alerts[i]}`;
+    }
+    question = `${question}\n请给出分步骤操作和注意事项。`;
+    return question;
+  }
+
+  private buildAiInterventionText(alerts: string[]): string {
+    if (alerts.length === 0) {
+      return '当前未检测到新的异常触发。你可以点击下方按钮，向 AI 咨询作物管理建议。';
+    }
+    let text: string = '检测到新的环境异常，建议优先处理以下项：';
+    const limit: number = alerts.length > 2 ? 2 : alerts.length;
+    for (let i: number = 0; i < limit; i++) {
+      const alertText: string = alerts[i];
+      text = `${text}\n• ${alertText}\n  ${this.getAlertSuggestion(alertText)}`;
+    }
+    if (alerts.length > limit) {
+      text = `${text}\n另有 ${alerts.length - limit} 项异常，请进入 AI 详情查看完整建议。`;
+    }
+    return text;
+  }
+
+  private tryAutoAiIntervention(newAlerts: string[]): void {
+    if (newAlerts.length === 0) {
+      return;
+    }
+    const nowMs: number = Date.now();
+    if (nowMs - this.lastAiInterventionAt < AI_INTERVENTION_COOLDOWN_MS) {
+      return;
+    }
+    const nextAlerts: string[] = [];
+    for (let i: number = 0; i < newAlerts.length; i++) {
+      nextAlerts.push(newAlerts[i]);
+    }
+    this.aiInterventionAlerts = nextAlerts;
+    this.aiInterventionText = this.buildAiInterventionText(nextAlerts);
+    this.aiInterventionQuestion = this.buildAiQuestionFromAlerts(nextAlerts);
+    this.showAiAssistantDrawer = true;
+    this.lastAiInterventionAt = nowMs;
   }
 
   private buildAlertText(
