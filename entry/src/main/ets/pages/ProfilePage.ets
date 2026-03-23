@@ -1,9 +1,11 @@
 @Component
 export struct ProfilePage {
   pathStack: NavPathStack = new NavPathStack();
+  @State showFaultDialog: boolean = false;
 
   build() {
-    Column() {
+    Stack() {
+      Column() {
       Row() {
         Text('我的')
           .fontSize(20)
@@ -55,7 +57,9 @@ export struct ProfilePage {
           this.MenuItem('AI农技问答', '问题诊断与建议', () => {
             this.pathStack.pushPathByName('AiQaPage', null, false);
           })
-          this.MenuItem('关于', '版本与说明');
+          this.MenuItem('关于', '版本与说明', () => {
+            this.showDeviceFaultAlert();
+          });
         }
         .width('100%')
         .padding(16)
@@ -65,10 +69,76 @@ export struct ProfilePage {
       .layoutWeight(1)
       .scrollBar(BarState.Off)
       .align(Alignment.TopStart)
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#F0F2F5')
+
+      if (this.showFaultDialog) {
+        Column() {}
+          .width('100%')
+          .height('100%')
+          .backgroundColor('#66000000')
+          .onClick(() => {
+            this.showFaultDialog = false;
+          })
+
+        Column({ space: 14 }) {
+          Text('设备故障警报')
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#333333')
+
+          Row({ space: 10 }) {
+            Image($r('app.media.warning'))
+              .width(22)
+              .height(22)
+            Text('时间：03-18 14:00\n地点：大棚1\n检测到风扇故障')
+              .fontSize(14)
+              .lineHeight(22)
+              .fontColor('#333333')
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+
+          Row({ space: 10 }) {
+            Button('关闭')
+              .layoutWeight(1)
+              .height(40)
+              .fontSize(15)
+              .fontColor('#333333')
+              .backgroundColor('#EEF1F4')
+              .borderRadius(8)
+              .onClick(() => {
+                this.showFaultDialog = false;
+              })
+
+            Button('转发至大棚1')
+              .layoutWeight(1)
+              .height(40)
+              .fontSize(15)
+              .fontColor(Color.White)
+              .backgroundColor('#2E7D32')
+              .borderRadius(8)
+              .onClick(() => {
+                this.showFaultDialog = false;
+                this.showForwardSuccessAlert();
+              })
+          }
+          .width('100%')
+        }
+        .width('86%')
+        .padding(16)
+        .backgroundColor(Color.White)
+        .borderRadius(12)
+        .align(Alignment.Center)
+        .onClick(() => {
+          // 阻止点击弹窗内容时触发蒙层关闭
+        })
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F0F2F5')
   }
 
   @Builder
@@ -95,5 +165,20 @@ export struct ProfilePage {
         onPress();
       }
     })
+  }
+
+  private showDeviceFaultAlert(): void {
+    this.showFaultDialog = true;
+  }
+
+  private showForwardSuccessAlert(): void {
+    AlertDialog.show({
+      title: '转发结果',
+      message: '故障信息已转发到大棚1（4）',
+      primaryButton: {
+        value: '知道了',
+        action: () => {}
+      }
+    });
   }
 }
