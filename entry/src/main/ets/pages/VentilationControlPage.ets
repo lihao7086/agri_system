@@ -248,14 +248,14 @@ struct VentilationControlPage {
           this.executeResult = '开启失败：5秒内未收到开启确认';
           AlertDialog.show({
             title: '提示',
-            message: '开启失败：设备未在5秒内反馈为开启状态，或硬件仍为关闭。',
+            message: '开启失败：疑似硬件故障或断联。',
             primaryButton: { value: '知道了', action: () => {} }
           });
         } else if (exp === false && this.fanOn) {
           this.executeResult = '关闭失败：5秒内未收到关闭确认';
           AlertDialog.show({
             title: '提示',
-            message: '关闭失败：设备未在5秒内反馈为关闭状态，或硬件仍在运行。',
+            message: '关闭失败：疑似硬件故障或断联。',
             primaryButton: { value: '知道了', action: () => {} }
           });
         }
